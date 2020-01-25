@@ -1,4 +1,4 @@
-module github.com/UnnoTed/fileb0x
+module github.com/Velocidex/fileb0x
 
 require (
 	github.com/BurntSushi/toml v0.3.1
