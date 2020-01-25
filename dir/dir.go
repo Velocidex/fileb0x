@@ -1,6 +1,9 @@
 package dir
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // Dir holds directory information to insert into templates
 type Dir struct {
@@ -65,6 +68,8 @@ func (d *Dir) Clean() []string {
 			cleanList = append(cleanList, dir)
 		}
 	}
+
+	sort.Strings(cleanList)
 
 	return cleanList
 }
