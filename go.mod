@@ -2,7 +2,7 @@ module github.com/Velocidex/fileb0x
 
 require (
 	github.com/BurntSushi/toml v0.3.1
-	github.com/UnnoTed/fileb0x v0.0.0-00010101000000-000000000000
+	github.com/UnnoTed/fileb0x v1.1.4
 	github.com/bmatcuk/doublestar v1.1.1
 	github.com/gizak/termui/v3 v3.1.0
 	github.com/karrick/godirwalk v1.7.8
@@ -13,7 +13,5 @@ require (
 	golang.org/x/net v0.0.0-20190404232315-eb5bcb51f2a3
 	gopkg.in/yaml.v2 v2.2.2
 )
-
-replace github.com/UnnoTed/fileb0x => ./
 
 go 1.13

@@ -17,7 +17,7 @@ import (
 
 	"encoding/json"
 
-	"github.com/UnnoTed/fileb0x/file"
+	"github.com/Velocidex/fileb0x/file"
 	termui "github.com/gizak/termui/v3"
 	"github.com/gizak/termui/v3/widgets"
 )

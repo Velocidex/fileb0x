@@ -7,11 +7,12 @@ import (
 	"os"
 	"path"
 
-	"github.com/UnnoTed/fileb0x/utils"
+	"github.com/Velocidex/fileb0x/utils"
+
+	"fmt"
 
 	"github.com/BurntSushi/toml"
 	"gopkg.in/yaml.v2"
-	"fmt"
 )
 
 // File holds config file info
