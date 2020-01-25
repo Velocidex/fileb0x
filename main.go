@@ -121,11 +121,13 @@ func main() {
 	exists := fileExists(cfg.Dest + cfg.Output)
 
 	if exists {
-		// gets the modification hash from the main b0x file
-		lastHash, err = getModification(cfg.Dest+cfg.Output, hashStart, hashEnd)
-		if err != nil {
-			panic(err)
-		}
+		/*
+			// gets the modification hash from the main b0x file
+			lastHash, err = getModification(cfg.Dest+cfg.Output, hashStart, hashEnd)
+			if err != nil {
+				panic(err)
+			}
+		*/
 	}
 
 	if !exists || lastHash != modHash {
