@@ -7,7 +7,7 @@ import (
 
 	"time"
 
-	"github.com/UnnoTed/fileb0x/file"
+	"github.com/Velocidex/fileb0x/file"
 	"github.com/stretchr/testify/assert"
 )
 

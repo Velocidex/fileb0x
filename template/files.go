@@ -7,84 +7,66 @@ package {{.Pkg}}
 
 import (
   "bytes"
-  {{if not .Spread}}{{if and $Compression.Compress (not .Debug)}}{{if not $Compression.Keep}}"compress/gzip"{{end}}{{end}}{{end}}
+  {{ if and $Compression.Compress }}{{if not $Compression.Keep}}"compress/gzip"{{end}}{{end}}
   "context"
   "io"
   "net/http"
   "os"
   "path"
-{{if or .Updater.Enabled .Debug}}
-  "strings"
-{{end}}
-
   "golang.org/x/net/webdav"
-
-{{if .Updater.Enabled}}
-  "crypto/sha256"
-	"encoding/hex"
-  "log"
-  "path/filepath"
-
-	"github.com/labstack/echo"
-	"github.com/labstack/echo/middleware"
-{{end}}
 )
 
 var (
+  _ = bytes.Buffer{}
+  _ = io.Copy
+
   // CTX is a context for webdav vfs
   {{exported "CTX"}} = context.Background()
 
-  {{if .Debug}}
-  {{exported "FS"}} = webdav.Dir(".")
-  {{else}}
-  // FS is a virtual memory file system
-  {{exported "FS"}} = webdav.NewMemFS()
-  {{end}}
-
-  // Handler is used to server files through a http handler
-  {{exportedTitle "Handler"}} *webdav.Handler
-
-  // HTTP is the http file system
-  {{exportedTitle "HTTP"}} http.FileSystem = new({{exported "HTTPFS"}})
+  // Inventory maps paths to slices
+  {{exportedTitle "Inventory"}} = map[string][]byte{
+    {{- range .Files }}
+      "/{{ .Path }}": {{exportedTitle "File"}}{{ buildSafeVarName .Path }},
+    {{- end -}}
+  }
 )
+
+func NewHTTPFS() *HTTPFS {
+   return &HTTPFS{
+      FS: GetFS(),
+   }
+}
 
 // HTTPFS implements http.FileSystem
 type {{exported "HTTPFS"}} struct {
 	// Prefix allows to limit the path of all requests. F.e. a prefix "css" would allow only calls to /css/*
 	Prefix string
+    FS webdav.FileSystem
 }
 
-{{if (and (not .Spread) (not .Debug))}}
 {{range .Files}}
 // {{exportedTitle "File"}}{{buildSafeVarName .Path}} is "{{.Path}}"
 var {{exportedTitle "File"}}{{buildSafeVarName .Path}} = {{.Data}}
 {{end}}
-{{end}}
 
-func init() {
+func GetFS() webdav.FileSystem {
+  FS := webdav.NewMemFS()
+
   err := {{exported "CTX"}}.Err()
   if err != nil {
 		panic(err)
 	}
 
-{{ $length := len .DirList }}
-{{ $fLength := len .Files }}
-{{ $noDirsButFiles := (and (not .Spread) (eq $length 0) (gt $fLength 0)) }}
-{{if not .Debug}}
 {{range $index, $dir := .DirList}}
   {{if and (ne $dir "./") (ne $dir "/") (ne $dir ".") (ne $dir "")}}
-  err = {{exported "FS"}}.Mkdir({{exported "CTX"}}, "{{$dir}}", 0777)
+  err = FS.Mkdir({{exported "CTX"}}, "{{$dir}}", 0777)
   if err != nil && err != os.ErrExist {
     panic(err)
   }
   {{end}}
 {{end}}
-{{end}}
 
-{{if (and (not .Spread) (not .Debug))}}
-  {{if not .Updater.Empty}}
   var f webdav.File
-  {{end}}
 
   {{if $Compression.Compress}}
   {{if not $Compression.Keep}}
@@ -109,7 +91,7 @@ func init() {
   {{end}}
   {{end}}
 
-  f, err = {{exported "FS"}}.OpenFile({{exported "CTX"}}, "{{.Path}}", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
+  f, err = FS.OpenFile({{exported "CTX"}}, "{{.Path}}", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
   if err != nil {
     panic(err)
   }
@@ -133,43 +115,15 @@ func init() {
     panic(err)
   }
   {{end}}
-{{end}}
 
-  {{exportedTitle "Handler"}} = &webdav.Handler{
-    FileSystem: FS,
-    LockSystem: webdav.NewMemLS(),
-  }
-
-{{if .Updater.Enabled}}
-  go func() {
-    svr := &{{exportedTitle "Server"}}{}
-    svr.Init()
-  }()
-{{end}}
+  return FS
 }
-
-{{if .Debug}}
-var remap = map[string]map[string]string{
-  {{.Remap}}
-}
-{{end}}
 
 // Open a file
 func (hfs *{{exported "HTTPFS"}}) Open(path string) (http.File, error) {
   path = hfs.Prefix + path
 
-{{if .Debug}}
-  path = strings.TrimPrefix(path, "/")
-
-  for current, f := range remap {
-    if path == current {
-      path = f["base"] + strings.TrimPrefix(path, f["prefix"])
-      break
-    }
-  }
-
-{{end}}
-  f, err := {{if .Debug}}os{{else}}{{exported "FS"}}{{end}}.OpenFile({{if not .Debug}}{{exported "CTX"}}, {{end}}path, os.O_RDONLY, 0644)
+  f, err := hfs.FS.OpenFile({{exported "CTX"}}, path, os.O_RDONLY, 0644)
   if err != nil {
     return nil, err
   }
@@ -179,50 +133,33 @@ func (hfs *{{exported "HTTPFS"}}) Open(path string) (http.File, error) {
 
 // ReadFile is adapTed from ioutil
 func {{exportedTitle "ReadFile"}}(path string) ([]byte, error) {
-  f, err := {{if .Debug}}os{{else}}{{exported "FS"}}{{end}}.OpenFile({{if not .Debug}}{{exported "CTX"}}, {{end}}path, os.O_RDONLY, 0644)
+  raw, pres := Inventory[path]
+  if !pres {
+     return nil, os.ErrNotExist
+  }
+
+  {{if $Compression.Compress}}
+
+  rb := bytes.NewReader(raw)
+  r, err := gzip.NewReader(rb)
   if err != nil {
     return nil, err
   }
 
   buf := bytes.NewBuffer(make([]byte, 0, bytes.MinRead))
-
-  // If the buffer overflows, we will get bytes.ErrTooLarge.
-  // Return that as an error. Any other panic remains.
-  defer func() {
-    e := recover()
-    if e == nil {
-      return
-    }
-    if panicErr, ok := e.(error); ok && panicErr == bytes.ErrTooLarge {
-      err = panicErr
-    } else {
-      panic(e)
-    }
-  }()
-  _, err = buf.ReadFrom(f)
+  _, err = buf.ReadFrom(r)
   return buf.Bytes(), err
-}
+  {{ else }}
 
-// WriteFile is adapTed from ioutil
-func {{exportedTitle "WriteFile"}}(filename string, data []byte, perm os.FileMode) error {
-  f, err := {{exported "FS"}}.OpenFile({{exported "CTX"}}, filename, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, perm)
-  if err != nil {
-    return err
-  }
-  n, err := f.Write(data)
-  if err == nil && n < len(data) {
-    err = io.ErrShortWrite
-  }
-  if err1 := f.Close(); err == nil {
-    err = err1
-  }
-  return err
+  return raw, nil
+
+  {{ end }}
 }
 
 // WalkDirs looks for files in the given dir and returns a list of files in it
 // usage for all files in the b0x: WalkDirs("", false)
-func {{exportedTitle "WalkDirs"}}(name string, includeDirsInList bool, files ...string) ([]string, error) {
-	f, err := {{exported "FS"}}.OpenFile({{exported "CTX"}}, name, os.O_RDONLY, 0)
+func {{exportedTitle "WalkDirs"}}(fs webdav.FileSystem, name string, includeDirsInList bool, files ...string) ([]string, error) {
+	f, err := fs.OpenFile({{exported "CTX"}}, name, os.O_RDONLY, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -245,7 +182,7 @@ func {{exportedTitle "WalkDirs"}}(name string, includeDirsInList bool, files ...
 		}
 
 		if info.IsDir() {
-			files, err = {{exportedTitle "WalkDirs"}}(filename, includeDirsInList, files...)
+			files, err = {{exportedTitle "WalkDirs"}}(fs, filename, includeDirsInList, files...)
 			if err != nil {
 				return nil, err
 			}
@@ -255,156 +192,4 @@ func {{exportedTitle "WalkDirs"}}(name string, includeDirsInList bool, files ...
 	return files, nil
 }
 
-{{if .Updater.Enabled}}
-// Auth holds information for a http basic auth
-type {{exportedTitle "Auth"}} struct {
-  Username string
-  Password string
-}
-
-// ResponseInit holds a list of hashes from the server
-// to be sent to the client so it can check if there
-// is a new file or a changed file
-type {{exportedTitle "ResponseInit"}} struct {
-  Success bool
-  Hashes  map[string]string
-}
-
-// Server holds information about the http server
-// used to update files remotely
-type {{exportedTitle "Server"}} struct {
-  Auth {{exportedTitle "Auth"}}
-  Files []string
-}
-
-// Init sets the routes and basic http auth
-// before starting the http server
-func (s *{{exportedTitle "Server"}}) Init() {
-  s.Auth = {{exportedTitle "Auth"}}{
-    Username: "{{.Updater.Username}}",
-    Password: "{{.Updater.Password}}",
-  }
-
-  e := echo.New()
-  e.Use(middleware.Recover())
-  e.Use(s.BasicAuth())
-  e.POST("/", s.Post)
-  e.GET("/", s.Get)
-
-  log.Println("fileb0x updater server is running at port 0.0.0.0:{{.Updater.Port}}")
-  if err := e.Start(":{{.Updater.Port}}"); err != nil {
-    panic(err)
-  }
-}
-
-// Get gives a list of file names and hashes
-func (s *{{exportedTitle "Server"}}) Get(c echo.Context) error {
-  log.Println("[fileb0x.Server]: Hashing server files...")
-
-  // file:hash
-  hashes := map[string]string{}
-
-  // get all files in the virtual memory file system
-  var err error
-  s.Files, err = {{exportedTitle "WalkDirs"}}("", false)
-  if err != nil {
-    return err
-  }
-
-  // get a hash for each file
-  for _, filePath := range s.Files {
-    f, err := FS.OpenFile(CTX, filePath, os.O_RDONLY, 0644)
-    if err != nil {
-      return err
-    }
-
-    hash := sha256.New()
-    _, err = io.Copy(hash, f)
-    if err != nil {
-      return err
-    }
-
-    hashes[filePath] = hex.EncodeToString(hash.Sum(nil))
-  }
-
-  log.Println("[fileb0x.Server]: Done hashing files")
-  return c.JSON(http.StatusOK, &ResponseInit{
-    Success: true,
-    Hashes: hashes,
-  })
-}
-
-// Post is used to upload a file and replace
-// it in the virtual memory file system
-func (s *{{exportedTitle "Server"}}) Post(c echo.Context) error {
-  file, err := c.FormFile("file")
-	if err != nil {
-		return err
-	}
-
-  log.Println("[fileb0x.Server]:", file.Filename, "Found request to upload a file")
-
-	src, err := file.Open()
-	if err != nil {
-		return err
-	}
-	defer src.Close()
-
-
-  newDir := filepath.Dir(file.Filename)
-  _, err = {{exported "FS"}}.Stat({{exported "CTX"}}, newDir)
-  if err != nil && strings.HasSuffix(err.Error(), os.ErrNotExist.Error()) {
-    log.Println("[fileb0x.Server]: Creating dir tree", newDir)
-    list := strings.Split(newDir, "/")
-    var tree string
-
-    for _, dir := range list {
-      if dir == "" || dir == "." || dir == "/" || dir == "./" {
-        continue
-      }
-
-      tree += dir + "/"
-      err = {{exported "FS"}}.Mkdir({{exported "CTX"}}, tree, 0777)
-      if err != nil && err != os.ErrExist {
-        log.Println("failed", err)
-        return err
-      }
-    }
-  }
-
-  log.Println("[fileb0x.Server]:", file.Filename, "Opening file...")
-  f, err := {{exported "FS"}}.OpenFile({{exported "CTX"}}, file.Filename, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0777)
-  if err != nil && !strings.HasSuffix(err.Error(), os.ErrNotExist.Error()) {
-    return err
-  }
-
-  log.Println("[fileb0x.Server]:", file.Filename, "Writing file into Virutal Memory FileSystem...")
-  if _, err = io.Copy(f, src); err != nil {
-		return err
-	}
-
-  if err = f.Close(); err != nil {
-    return err
-  }
-
-  log.Println("[fileb0x.Server]:", file.Filename, "Done writing file")
-  return c.String(http.StatusOK, "ok")
-}
-
-// BasicAuth is a middleware to check if
-// the username and password are valid
-// echo's middleware isn't used because of golint issues
-func (s *{{exportedTitle "Server"}}) BasicAuth() echo.MiddlewareFunc {
-	return func(next echo.HandlerFunc) echo.HandlerFunc {
-		return func(c echo.Context) error {
-			u, p, _ := c.Request().BasicAuth()
-			if u != s.Auth.Username || p != s.Auth.Password {
-				return echo.ErrUnauthorized
-			}
-
-			return next(c)
-		}
-	}
-}
-{{end}}
 `
