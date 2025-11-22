@@ -12,7 +12,6 @@ import (
   "io"
   "net/http"
   "os"
-  "path"
   "golang.org/x/net/webdav"
 )
 
@@ -154,42 +153,6 @@ func {{exportedTitle "ReadFile"}}(path string) ([]byte, error) {
   return raw, nil
 
   {{ end }}
-}
-
-// WalkDirs looks for files in the given dir and returns a list of files in it
-// usage for all files in the b0x: WalkDirs("", false)
-func {{exportedTitle "WalkDirs"}}(fs webdav.FileSystem, name string, includeDirsInList bool, files ...string) ([]string, error) {
-	f, err := fs.OpenFile({{exported "CTX"}}, name, os.O_RDONLY, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	fileInfos, err := f.Readdir(0)
-	if err != nil {
-    return nil, err
-  }
-
-  err = f.Close()
-  if err != nil {
-		return nil, err
-	}
-
-	for _, info := range fileInfos {
-		filename := path.Join(name, info.Name())
-
-		if includeDirsInList || !info.IsDir() {
-			files = append(files, filename)
-		}
-
-		if info.IsDir() {
-			files, err = {{exportedTitle "WalkDirs"}}(fs, filename, includeDirsInList, files...)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	return files, nil
 }
 
 `
