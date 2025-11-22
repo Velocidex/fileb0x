@@ -3,6 +3,7 @@ package custom
 import (
 	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
@@ -213,7 +214,8 @@ func (c *Custom) Parse(files *map[string]*file.File, dirs **dir.Dir, config *Sha
 			if err := godirwalk.Walk(customFile, &godirwalk.Options{
 				Unsorted: true,
 				Callback: cb,
-			}); err != nil {
+				// https://github.com/karrick/godirwalk/issues/70
+			}); err != nil && err != io.EOF {
 				return err
 			}
 
